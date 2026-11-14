@@ -131,7 +131,9 @@ describe("data-agent-confirm", () => {
       await agent.act({ steps: [{ ref: "Buy credits", action: "press" }] })
     ).toMatchObject({
       ok: false,
-      error: { message: 'The person said no to "Charges $20 to your card".' },
+      error: {
+        message: 'The person or the app said no to "Charges $20 to your card".',
+      },
     })
     expect(onClick).toHaveBeenCalledTimes(1)
   })

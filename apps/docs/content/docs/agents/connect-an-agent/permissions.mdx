@@ -22,6 +22,8 @@ const agent = createAgent({
 
 Return `true` to let an action run or `false` to refuse it. On a refusal, `act` returns `ok: false` and stops. Any earlier steps stay applied.
 
+To tell the agent who refused, return `{ refusedBy: "app" }` for a rule of your app's, or `{ refusedBy: "person" }` when the person said no. The step then fails with `The app refused setValue on c1.` or `The person said no to setValue on c1.` A plain `false` reads as the app's refusal, `The app refused setValue on c1.`, except on a step [marked for a person](#mark-what-needs-a-person). Any other object refuses the step too, so return `true`, not an object, to let a step run.
+
 The callback also receives `ref` and `args`. If the agent asks for an item by label, the bridge resolves it to a value first. For example, `"North America"` becomes `"north-america"`. A list whose items show only while it's open has to open to resolve a label, so the callback is asked first with the label, before it opens, and then with the value.
 
 The callback runs before the step changes anything. A `press` that opens a closed menu or dialog to find its button asks before it opens, and closes it again when the answer is no.
@@ -36,15 +38,17 @@ import { createAgent } from "@ui-sdk/react/agent"
 const agent = createAgent({
   allow: ({ component, label, action, args }) => {
     if (component !== "select" || label !== "Region" || action !== "setValue") {
-      return false
+      return { refusedBy: "app" }
     }
 
-    return window.confirm(`Change Region to ${args[0]}?`)
+    return (
+      window.confirm(`Change Region to ${args[0]}?`) || { refusedBy: "person" }
+    )
   },
 })
 ```
 
-Try changing Region through the console or ChatGPT again. **OK** allows the change; **Cancel** refuses it.
+Try changing Region through the console or ChatGPT again. **OK** allows the change; **Cancel** refuses it, and the agent hears that the person said no.
 
 For your own confirmation UI, return a `Promise<boolean>` that resolves with the person's answer. The bridge waits before running the action. Later `act` and `query` calls on the same bridge wait too. If nobody answers within 5 minutes, the step fails and the `signal` passed to `allow` aborts, so you can close your prompt. Set `timeout` on `createAgent` to change the wait.
 
@@ -71,12 +75,13 @@ With `allow`, the step waits for your callback, and `step.confirm` carries the s
 
 ```ts
 const agent = createAgent({
-  allow: (step, { signal }) =>
-    step.confirm ? showConfirm(step.confirm, { signal }) : true,
+  allow: async (step, { signal }) =>
+    !step.confirm ||
+    (await showConfirm(step.confirm, { signal })) || { refusedBy: "person" },
 })
 ```
 
-If the person says no, the step fails with `The person said no to "…"`.
+If the person says no, the step fails with `The person said no to "…"`. A rule that refuses a marked step returns `{ refusedBy: "app" }`, and the step fails with `The app refused press on c1.` A plain `false` doesn't say who refused a marked step, so it fails with `The person or the app said no to "…"`.
 
 The mark covers its element and everything inside it, for any action. Put it on a form or section to cover every control in it, or on a dialog's content to cover the buttons inside, wherever the dialog renders.
 

@@ -16,11 +16,13 @@ import { registerTools } from "@ui-sdk/react/agent"
 import { agent } from "./agent"
 
 const unregister = registerTools(agent, {
-  allow: (step) => step.action !== "press" || confirm(`Press ${step.args[0]}?`),
+  allow: (step) =>
+    step.action !== "press" ||
+    confirm(`Press ${step.args[0]}?`) || { refusedBy: "person" },
 })
 ```
 
-The browser's agent can now read components and call their actions. You didn't write that agent, so `registerTools` asks for an `allow` of its own. It runs for every step the browser's agent asks for, after your bridge's [permissions](./permissions), and works the same way: return `false` to refuse a step. Here it asks you before every press. To let every step run, pass `allow: () => true`. Your change callbacks still apply.
+The browser's agent can now read components and call their actions. You didn't write that agent, so `registerTools` asks for an `allow` of its own. It runs for every step the browser's agent asks for, after your bridge's [permissions](./permissions), and works the same way: return `false` to refuse a step, or `{ refusedBy: "person" }` or `{ refusedBy: "app" }` to say who refused. Here it asks you before every press, and tells the agent when you said no. To let every step run, pass `allow: () => true`. Your change callbacks still apply.
 
 Registration requires a browser that provides `document.modelContext.registerTool`. In a browser without it, `registerTools` does nothing.
 
