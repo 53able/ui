@@ -155,7 +155,206 @@ describe("agent", () => {
     const outcome = await agent.act({
       steps: [{ ref, action: "setChecked", args: [true] }],
     })
-    expect(outcome.steps[0].changes).toBeUndefined()
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: { step: 0, message: `The app refused setChecked on ${ref}.` },
+      steps: [],
+      values: { [`${ref} Accept the terms`]: false },
+    })
+  })
+
+  test("a canceled step stops later steps and keeps earlier changes", async () => {
+    const agent = createAgent()
+    const first = mountCheckbox({ id: "first" }, "First")
+    const afterCancel = vi.fn()
+    const refused = mountCheckbox(
+      {
+        id: "refused",
+        onCheckedChange: (_checked, details) => {
+          details.cancel()
+          afterCancel()
+        },
+      },
+      "Refused"
+    )
+    const lastChange = vi.fn()
+    const last = mountCheckbox(
+      { id: "last", onCheckedChange: lastChange },
+      "Last"
+    )
+    const outcome = await agent.act({
+      steps: ["First", "Refused", "Last"].map((ref) => ({
+        ref,
+        action: "setChecked",
+        args: [true],
+      })),
+    })
+    expect(outcome).toMatchObject({ ok: false, error: { step: 1 } })
+    expect(outcome.steps).toHaveLength(1)
+    expect(first.get().checked).toBe(true)
+    expect(refused.get().checked).toBe(false)
+    expect(last.get().checked).toBe(false)
+    expect(lastChange).not.toHaveBeenCalled()
+    expect(afterCancel).toHaveBeenCalledOnce()
+    expect(
+      await agent.act({
+        steps: [{ ref: "Last", action: "setChecked", args: [true] }],
+      })
+    ).toMatchObject({ ok: true })
+  })
+
+  test("an unchanged value stays successful without calling its change callback", async () => {
+    const agent = createAgent()
+    const onCheckedChange = vi.fn()
+    mountCheckbox({ id: "terms", onCheckedChange })
+    const outcome = await agent.act({
+      steps: [{ ref: "Accept the terms", action: "setChecked", args: [false] }],
+    })
+    expect(outcome).toMatchObject({ ok: true, steps: [{ result: false }] })
+    expect(onCheckedChange).not.toHaveBeenCalled()
+  })
+
+  test("a press fails when its synchronous change callback cancels", async () => {
+    const agent = createAgent()
+    const target = mountCheckbox({
+      id: "terms",
+      onCheckedChange: (_checked, details) => details.cancel(),
+    })
+    const earlier = mountCheckbox({ id: "earlier" }, "Earlier")
+    const instance = button({ id: "apply" })
+    const el = document.body.appendChild(document.createElement("button"))
+    el.textContent = "Apply"
+    const afterChange = vi.fn()
+    el.addEventListener("click", () => {
+      earlier.api.setChecked(true)
+      target.api.setChecked(true)
+      afterChange()
+    })
+    cleanups.push(bind(instance.part("root"), el), () => instance.destroy())
+    const outcome = await agent.act({
+      steps: [{ ref: "Apply", action: "press" }],
+    })
+    expect(outcome).toMatchObject({ ok: false, error: { step: 0 } })
+    expect(afterChange).toHaveBeenCalledOnce()
+    expect(earlier.get().checked).toBe(true)
+    expect(target.get().checked).toBe(false)
+  })
+
+  test("canceling retained details does not refuse a later action", async () => {
+    const agent = createAgent()
+    let cancel: (() => void) | undefined
+    mountCheckbox(
+      {
+        id: "first",
+        onCheckedChange: (_checked, details) => {
+          cancel = details.cancel
+        },
+      },
+      "First"
+    )
+    const second = mountCheckbox(
+      {
+        id: "second",
+        onCheckedChange: () => cancel?.(),
+      },
+      "Second"
+    )
+    const outcome = await agent.act({
+      steps: ["First", "Second"].map((ref) => ({
+        ref,
+        action: "setChecked",
+        args: [true],
+      })),
+    })
+    expect(outcome.ok).toBe(true)
+    expect(second.get().checked).toBe(true)
+  })
+
+  test("a throwing callback does not leave cancellation tracking on the next action", async () => {
+    const agent = createAgent()
+    const first = mountCheckbox(
+      {
+        id: "first",
+        onCheckedChange: (_checked, details) => {
+          details.cancel()
+          throw new Error("Rejected by callback")
+        },
+      },
+      "First"
+    )
+    const second = mountCheckbox({ id: "second" }, "Second")
+    expect(
+      await agent.act({
+        steps: [{ ref: "First", action: "setChecked", args: [true] }],
+      })
+    ).toMatchObject({ ok: false, error: { message: "Rejected by callback" } })
+    expect(
+      await agent.act({
+        steps: [{ ref: "Second", action: "setChecked", args: [true] }],
+      })
+    ).toMatchObject({ ok: true })
+    expect(first.get().checked).toBe(false)
+    expect(second.get().checked).toBe(true)
+  })
+
+  test("canceling a change outside an agent keeps its nonthrowing false result", () => {
+    const instance = mountCheckbox({
+      id: "terms",
+      onCheckedChange: (_checked, details) => details.cancel(),
+    })
+    expect(instance.api.setChecked(true)).toBe(false)
+    expect(instance.get().checked).toBe(false)
+  })
+
+  test("a canceled secret field fails without exposing its value", async () => {
+    const agent = createAgent()
+    const instance = input({
+      id: "password",
+      onValueChange: (_value, details) => details.cancel(),
+    })
+    const el = document.body.appendChild(document.createElement("input"))
+    el.type = "password"
+    el.setAttribute("aria-label", "Password")
+    cleanups.push(bind(instance.part("root"), el), () => instance.destroy())
+    const outcome = await agent.act({
+      steps: [{ ref: "Password", action: "setValue", args: ["swordfish"] }],
+    })
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: { message: "[redacted]" },
+    })
+    expect(JSON.stringify(outcome)).not.toContain("swordfish")
+    expect(instance.get().value).toBe("")
+  })
+
+  test("WebMCP stops after a change callback cancels", async () => {
+    const tools = new Map<string, { execute: (input: object) => unknown }>()
+    const registerTool = vi.fn(
+      async (tool: { name: string; execute: (input: object) => unknown }) => {
+        tools.set(tool.name, tool)
+      }
+    )
+    Object.assign(document, { modelContext: { registerTool } })
+    cleanups.push(() => {
+      delete (document as { modelContext?: unknown }).modelContext
+    })
+    const agent = createAgent()
+    mountCheckbox(
+      { id: "first", onCheckedChange: (_checked, details) => details.cancel() },
+      "First"
+    )
+    const onCheckedChange = vi.fn()
+    mountCheckbox({ id: "second", onCheckedChange }, "Second")
+    cleanups.push(registerTools(agent, { allow: () => true }))
+    const outcome = await tools.get("act")?.execute({
+      steps: ["First", "Second"].map((ref) => ({
+        ref,
+        action: "setChecked",
+        args: [true],
+      })),
+    })
+    expect(outcome).toMatchObject({ ok: false, error: { step: 0 } })
+    expect(onCheckedChange).not.toHaveBeenCalled()
   })
 
   test("allow refuses an action before it runs", async () => {
@@ -2403,6 +2602,63 @@ describe("agent act", () => {
     // At least the 50 checkboxes past the first 100, and fields earlier tests left off the page.
     expect(more).toBeGreaterThanOrEqual(50)
     expect(fields[`${outcome.steps[0].ref} Admin 149`]).toBe(true)
+  })
+})
+
+describe("cancellation in custom actions", () => {
+  function mount(run: () => unknown) {
+    const task = definePrimitive({
+      name: "task",
+      state: (_options: {}) => ({}),
+      api: () => ({ run }),
+      slots: (slot) => ({
+        root: slot({ attrs: () => ({ "aria-label": "Task" }) }),
+      }),
+      agent: { actions: ["run"] },
+    })
+    const instance = task({ id: "task" })
+    const el = document.body.appendChild(document.createElement("div"))
+    cleanups.push(bind(instance.part("root"), el), () => instance.destroy())
+  }
+
+  test("an ordinary false result remains successful", async () => {
+    const agent = createAgent()
+    mount(() => false)
+    expect(
+      await agent.act({ steps: [{ ref: "Task", action: "run" }] })
+    ).toMatchObject({
+      ok: true,
+      steps: [{ result: false }],
+    })
+  })
+
+  test("a canceled action still handles a returned Promise rejection", async () => {
+    const agent = createAgent()
+    const target = mountCheckbox({
+      id: "terms",
+      onCheckedChange: (_checked, details) => details.cancel(),
+    })
+    const next = vi.fn()
+    mount(() => {
+      target.api.setChecked(true)
+      return Promise.reject(new Error("The server is down."))
+    })
+    mountCheckbox({ id: "next", onCheckedChange: next }, "Next")
+    const outcome = await agent.act({
+      steps: [
+        { ref: "Task", action: "run" },
+        { ref: "Next", action: "setChecked", args: [true] },
+      ],
+    })
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        step: 0,
+        message: expect.stringContaining("The server is down."),
+      },
+    })
+    expect(next).not.toHaveBeenCalled()
+    expect(target.get().checked).toBe(false)
   })
 })
 

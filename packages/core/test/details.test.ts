@@ -9,7 +9,9 @@ import {
 import type { PopoverOpenChangeReason } from "../src/components/popover/popover"
 import { changeSource } from "../src/foundation/kernel/input-source"
 import {
+  createDetails,
   isDismissal,
+  trackCancellation,
   type ChangeDetails,
   type ChangeSource,
   withSource,
@@ -177,5 +179,67 @@ describe("types", () => {
       MenuOpenChangeReason | "unmount"
     >()
     expect(controller).toBeTruthy()
+  })
+})
+
+describe("cancellation tracking", () => {
+  test("nested scopes report cancellation to their active parent", () => {
+    const outer = trackCancellation(() =>
+      withSource("agent", () =>
+        trackCancellation(() => {
+          createDetails({ reason: "imperative" }, "agent").cancel()
+          return false
+        })
+      )
+    )
+    expect(outer).toEqual({
+      result: { result: false, canceled: true },
+      canceled: true,
+    })
+  })
+
+  test("an inner scope without cancellation does not hide a later outer cancellation", () => {
+    const outer = trackCancellation(() => {
+      const details = createDetails({ reason: "imperative" }, "agent")
+      expect(trackCancellation(() => false)).toEqual({
+        result: false,
+        canceled: false,
+      })
+      details.cancel()
+    })
+    expect(outer.canceled).toBe(true)
+  })
+
+  test("retained details from a finished scope do not cancel an active scope", () => {
+    const details = trackCancellation(() =>
+      createDetails({ reason: "imperative" }, "agent")
+    ).result
+    expect(trackCancellation(() => details.cancel()).canceled).toBe(false)
+    expect(details.canceled).toBe(true)
+  })
+
+  test("a throwing nested scope restores its enclosing scope", () => {
+    const outer = trackCancellation(() => {
+      expect(() =>
+        trackCancellation(() => {
+          throw new Error("failed")
+        })
+      ).toThrow("failed")
+      createDetails({ reason: "imperative" }, "agent").cancel()
+    })
+    expect(outer.canceled).toBe(true)
+    expect(trackCancellation(() => false).canceled).toBe(false)
+  })
+
+  test("cancellation after an await is outside the synchronous scope", async () => {
+    const tracked = trackCancellation(async () => {
+      const details = createDetails({ reason: "imperative" }, "agent")
+      await Promise.resolve()
+      details.cancel()
+      return details.canceled
+    })
+    expect(await tracked.result).toBe(true)
+    expect(tracked.canceled).toBe(false)
+    expect(trackCancellation(() => false).canceled).toBe(false)
   })
 })

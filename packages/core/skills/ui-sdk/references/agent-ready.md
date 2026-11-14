@@ -130,7 +130,7 @@ test("an agent can find and change every setting", async () => {
 
 - A refused press closes the dialog it opened before `act` returns.
 - `press` with a button's text opens a closed dialog or menu to find it, and `press` with no text opens it through its trigger. Once a dialog is open, its label is its title, not the trigger's text.
-- `act` can return `ok: true` while a change callback cancelled a value. Check `result.values` or the DOM, not only `ok`.
+- A change created and canceled synchronously during the requested action makes `act` return `ok: false` and skip later steps. The callback finishes, and earlier effects are not rolled back. Cancellation after an `await` or during preparatory UI opening is outside this tracking. Check `result.values` or the DOM to see what took effect.
 - **An agent needs to find the choices an action takes.** The snapshot lists a component's `items` with it: the item and tab parts on the page, named by their text, or else its data when there are 10 or fewer. Data comes from the state's `items`, or from `agent.items` for any action, like a stepper's `goTo`. Longer lists come back from `query({ within: "<label>" })`. In the agent test, take the value from `snapshot()` or `query`, not from your own data. `query` resolves to a list of components or `{ error }`, so check which before you destructure it.
 
 Also look at the snapshot once by hand (`console.log(JSON.stringify(agent.snapshot(), null, 2))`): every entry should have a label a person would recognize, the actions you expect, and no `"actions": []` on a custom primitive that should do something.

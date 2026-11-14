@@ -120,7 +120,9 @@ onValueChange={(value, details) => {
 
 You can still choose Asia Pacific yourself. To apply the rule to every change, remove the `details.source === "agent"` check.
 
-Canceling a value change can leave `act` with `ok: true` and no change for that step. Check each step's `changes` and the returned `values` to confirm what happened.
+Calling `details.cancel()` synchronously during the requested action fails that step: `act` returns `ok: false` and skips later steps. The callback still finishes. Earlier steps and any effects already applied within the failed step stay applied; there is no rollback.
+
+This tracks changes created and canceled during the action's synchronous execution. Changes made after an `await`, and changes made while the bridge opens UI to find a target or its choices, are outside this tracking. Check the returned `values` to see what took effect.
 
 Put value checks in these change callbacks. Actions such as `setValue` call the component's API directly, so checks in keyboard or pointer handlers won't run.
 

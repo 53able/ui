@@ -92,7 +92,7 @@ The input now reads **Atlas**. Its `onValueChange` callback runs with `details.s
 
 You can use the label or the `ref` from the snapshot. A label matches whole words regardless of case and accents, so `"project name"` works too. If a label is ambiguous, the bridge returns an error with the matches. Use a specific `ref` to choose one.
 
-`result.steps` reports what each step changed, and `result.values` contains the current field values. A callback can cancel a change, so check those values when you need to know what took effect.
+`result.steps` reports completed steps and their changes, and `result.values` contains the current field values. Canceling a change synchronously during the requested action fails that step; [Permissions](./permissions#cancel-a-value-change) explains the scope. Check the returned values when you need to know what took effect.
 
 Put several steps in one call to run them in order. If a step fails, `result.ok` is `false` and `result.error` tells you which step failed and why. Earlier steps stay applied.
 
