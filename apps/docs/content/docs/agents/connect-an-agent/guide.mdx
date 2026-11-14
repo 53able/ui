@@ -241,9 +241,7 @@ const agent = createAgent()
 Object.assign(window, { agent })
 
 const unregister = registerTools(agent, {
-  allow: (step) =>
-    step.action !== "press" ||
-    confirm(`Press ${step.args[0]}?`) || { refusedBy: "person" },
+  allow: (step) => step.action !== "press" || confirm(`Press ${step.args[0]}?`),
 })
 
 if (import.meta.hot) {
@@ -253,7 +251,7 @@ if (import.meta.hot) {
 export { agent }
 ```
 
-`registerTools` publishes `snapshot`, `query`, and `act` through WebMCP when the browser supports it. Its `allow` asks you before the browser's agent presses a button, and tells the agent when you said no. The cleanup removes the old registration when Vite replaces the module during development.
+`registerTools` publishes `snapshot`, `query`, and `act` through WebMCP when the browser supports it. Its `allow` asks you before the browser's agent presses a button. The cleanup removes the old registration when Vite replaces the module during development.
 
 Reload the page after saving. `window.agent` is for the console exercise; WebMCP calls the bridge directly.
 

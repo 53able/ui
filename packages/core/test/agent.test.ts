@@ -511,219 +511,6 @@ describe("agent", () => {
     expect(() => registerTools(agent, { allow: () => true })()).not.toThrow()
   })
 
-  type Answer = boolean | { refusedBy: "person" | "app" }
-
-  function mountSave({
-    confirm,
-    own,
-    caller = () => true,
-  }: {
-    confirm?: string
-    own?: () => Answer | Promise<Answer>
-    caller?: () => Answer | Promise<Answer>
-  }) {
-    const tools = new Map<string, { execute: (input: object) => unknown }>()
-    Object.assign(document, {
-      modelContext: {
-        registerTool: async (tool: {
-          name: string
-          execute: (input: object) => unknown
-        }) => void tools.set(tool.name, tool),
-      },
-    })
-    cleanups.push(() => {
-      delete (document as { modelContext?: unknown }).modelContext
-    })
-    const asked: string[] = []
-    const agent = createAgent(
-      own
-        ? {
-            allow: () => {
-              asked.push("own")
-              return own()
-            },
-          }
-        : {}
-    )
-    cleanups.push(
-      registerTools(agent, {
-        allow: () => {
-          asked.push("caller")
-          return caller()
-        },
-      })
-    )
-    const instance = button({ id: "save" })
-    const el = document.createElement("button")
-    el.textContent = "Save"
-    if (confirm) {
-      el.setAttribute("data-agent-confirm", confirm)
-    }
-    const onClick = vi.fn()
-    el.addEventListener("click", onClick)
-    document.body.append(el)
-    cleanups.push(bind(instance.part("root"), el), () => instance.destroy())
-    const press = { steps: [{ ref: "Save", action: "press" }] }
-    return {
-      agent,
-      asked,
-      onClick,
-      press,
-      viaWebMcp: () =>
-        tools.get("act")!.execute(press) as Promise<{
-          ok: boolean
-          error?: { step: number; message: string }
-        }>,
-    }
-  }
-
-  const marked = "Saves for everyone"
-  const person = { refusedBy: "person" } as const
-  const app = { refusedBy: "app" } as const
-
-  test.each([
-    {
-      when: "the person said yes and a rule of the app's refused",
-      confirm: marked,
-      own: true,
-      caller: app,
-      asked: ["own", "caller"],
-      message: /^The app refused press on c\d+\.$/,
-    },
-    {
-      when: "the person said yes and a plain false followed",
-      confirm: marked,
-      own: true,
-      caller: false,
-      asked: ["own", "caller"],
-      message: /^The person or the app said no to "Saves for everyone"\.$/,
-    },
-    {
-      when: "the person said no to the bridge's `allow`",
-      confirm: marked,
-      own: person,
-      caller: true,
-      asked: ["own"],
-      message: /^The person said no to "Saves for everyone"\.$/,
-    },
-    {
-      when: "the person said no to the `allow` of `registerTools`",
-      confirm: marked,
-      own: true,
-      caller: person,
-      asked: ["own", "caller"],
-      message: /^The person said no to "Saves for everyone"\.$/,
-    },
-    {
-      when: "a plain false refused a marked step",
-      confirm: marked,
-      own: false,
-      caller: true,
-      asked: ["own"],
-      message: /^The person or the app said no to "Saves for everyone"\.$/,
-    },
-    {
-      when: "the person said no to a step without a mark",
-      confirm: undefined,
-      own: person,
-      caller: true,
-      asked: ["own"],
-      message: /^The person said no to press on c\d+\.$/,
-    },
-    {
-      when: "the app refused a step without a mark",
-      confirm: undefined,
-      own: app,
-      caller: true,
-      asked: ["own"],
-      message: /^The app refused press on c\d+\.$/,
-    },
-    {
-      when: "a plain false refused a step without a mark",
-      confirm: undefined,
-      own: false,
-      caller: true,
-      asked: ["own"],
-      message: /^The app refused press on c\d+\.$/,
-    },
-    {
-      when: "a plain false from `registerTools` refused a step without a mark",
-      confirm: undefined,
-      own: true,
-      caller: false,
-      asked: ["own", "caller"],
-      message: /^The app refused press on c\d+\.$/,
-    },
-  ])(
-    "a refused step says who refused: $when",
-    async ({ confirm, own, caller, asked, message }) => {
-      const save = mountSave({
-        confirm,
-        own: async () => own,
-        caller: () => caller,
-      })
-      const outcome = await save.viaWebMcp()
-      expect(outcome).toMatchObject({ ok: false, error: { step: 0 } })
-      expect(outcome.error?.message).toMatch(message)
-      expect(save.asked).toEqual(asked)
-      expect(save.onClick).not.toHaveBeenCalled()
-    }
-  )
-
-  test("the agent's own calls hear who refused too", async () => {
-    const save = mountSave({ confirm: marked, own: () => person })
-    expect((await save.agent.act(save.press)).error?.message).toBe(
-      'The person said no to "Saves for everyone".'
-    )
-    expect(save.onClick).not.toHaveBeenCalled()
-  })
-
-  test("the `allow` of `registerTools` can say who refused in a promise", async () => {
-    const save = mountSave({ confirm: marked, caller: async () => app })
-    expect((await save.viaWebMcp()).error?.message).toMatch(
-      /^The app refused press on c\d+\.$/
-    )
-    expect(save.onClick).not.toHaveBeenCalled()
-  })
-
-  test("a marked step runs when both `allow` say yes", async () => {
-    const save = mountSave({ confirm: marked, own: () => true })
-    expect(await save.viaWebMcp()).toMatchObject({ ok: true })
-    expect(save.asked).toEqual(["own", "caller"])
-    expect(save.onClick).toHaveBeenCalledTimes(1)
-  })
-
-  test.each([
-    { name: "an empty object", answer: {}, warns: true },
-    { name: "an unknown refuser", answer: { refusedBy: "robot" }, warns: true },
-    {
-      name: "an object that looks like a yes",
-      answer: { ok: true },
-      warns: true,
-    },
-    { name: "an array", answer: [], warns: true },
-    { name: "null", answer: null, warns: false },
-    { name: "undefined", answer: undefined, warns: false },
-  ])(
-    "an object, null or undefined from `allow` refuses the step: $name",
-    async ({ answer, warns }) => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-      const save = mountSave({ confirm: marked, own: () => answer as Answer })
-      expect(await save.agent.act(save.press)).toMatchObject({
-        ok: false,
-        error: {
-          message: 'The person or the app said no to "Saves for everyone".',
-        },
-      })
-      expect(save.onClick).not.toHaveBeenCalled()
-      expect(warn).toHaveBeenCalledTimes(warns ? 1 : 0)
-      if (warns) {
-        expect(warn.mock.calls[0][0]).toContain("`allow` returned an object")
-      }
-      warn.mockRestore()
-    }
-  )
-
   function mountRegion(
     items: { value: string; label: string; disabled?: boolean }[],
     onValueChange = vi.fn()
@@ -2167,10 +1954,8 @@ describe("agent act", () => {
     ])
   })
 
-  test("a closed section stays shut when `allow` refuses to open it with an object", async () => {
-    const agent = createAgent({
-      allow: (step) => step.action !== "open" || { refusedBy: "app" },
-    })
+  test("a closed section stays shut when allow refuses to open it", async () => {
+    const agent = createAgent({ allow: (step) => step.action !== "open" })
     const onValueChange = vi.fn()
     const instance = accordion({ id: "channels", onValueChange })
     for (const [value, text] of [
@@ -2452,7 +2237,7 @@ describe("agent act", () => {
       steps: [{ ref: "Tom Becker", action: "press", args: ["Remove"] }],
     })
     expect(outcome.error?.message).toBe(
-      'The person or the app said no to "Removes Tom from the team".'
+      'The person said no to "Removes Tom from the team".'
     )
     expect(changes).toEqual([
       [true, "agent"],
@@ -2466,27 +2251,6 @@ describe("agent act", () => {
     })
     expect(alone.error?.message).toMatch(/^Needs a person/)
     expect(instance.get().open).toBe(false)
-  })
-
-  test("a press the person refuses once its button shows closes the popup it opened", async () => {
-    const agent = createAgent({
-      allow: (step) => !step.confirm || { refusedBy: "person" },
-    })
-    const { instance, onClick, changes } = await mountActions({
-      confirm: "Removes Tom from the team",
-    })
-    const outcome = await agent.act({
-      steps: [{ ref: "Tom Becker", action: "press", args: ["Remove"] }],
-    })
-    expect(outcome.error?.message).toBe(
-      'The person said no to "Removes Tom from the team".'
-    )
-    expect(changes).toEqual([
-      [true, "agent"],
-      [false, "agent"],
-    ])
-    expect(instance.get().open).toBe(false)
-    expect(onClick).not.toHaveBeenCalled()
   })
 
   test("a dialog shared by many triggers lists them, and a press opens it through the one it names", async () => {
@@ -2562,7 +2326,7 @@ describe("agent act", () => {
     }
 
     expect((await agent.act(remove)).error?.message).toBe(
-      'The person or the app said no to "Deletes the project".'
+      'The person said no to "Deletes the project".'
     )
     approve = true
     expect(await agent.act(remove)).toMatchObject({ ok: true })

@@ -54,9 +54,8 @@ Create the bridge once, in the browser, from the same package as the components:
 import { agentTools, createAgent, registerTools } from "@ui-sdk/react/agent"
 
 const agent = createAgent({
-  allow: async (step, { signal }) =>
-    !step.confirm ||
-    (await askThePerson(step.confirm, { signal })) || { refusedBy: "person" },
+  allow: (step, { signal }) =>
+    step.confirm ? askThePerson(step.confirm, { signal }) : true,
 })
 
 export { agent }
@@ -64,8 +63,8 @@ export { agent }
 
 - `agent.snapshot()` lists the components, their state and their `actions`. `agent.act({ steps })` runs steps in order. `agent.query({ text, within, kind })` finds components and list items.
 - **Your own model:** `agentTools` has the three tools' names, descriptions and JSON Schemas. Route each tool call to the matching method on `agent` and return its result.
-- **A browser agent (WebMCP):** `const unregister = registerTools(agent, { allow })`. It does nothing in a browser without `document.modelContext`. `allow` is required here, since you didn't write that agent. Ask the person in one place: when the bridge's own `allow` already asks, as above, pass `allow: () => true` here, or every marked step asks twice.
-- `allow` returns `true`, `false`, or a promise of either for your own confirmation UI. To tell the agent who refused, return `{ refusedBy: "person" }` or `{ refusedBy: "app" }` in place of `false`: a plain `false` on a `data-agent-confirm` step fails with "The person or the app said no". Any other object refuses the step. Without `allow`, steps on `data-agent-confirm` fail with "Needs a person".
+- **A browser agent (WebMCP):** `const unregister = registerTools(agent, { allow })`. It does nothing in a browser without `document.modelContext`. `allow` is required here, since you didn't write that agent. Ask the person in one place: when the bridge's own `allow` already asks, as above, pass `allow: () => true` here, or every marked step asks twice. A step this `allow` refuses after the bridge's let it through fails with "The app refused".
+- `allow` returns `true`, `false`, or a `Promise<boolean>` for your own confirmation UI. Without it, steps on `data-agent-confirm` fail with "Needs a person".
 - In Next.js and other server rendering setups, create the bridge in client code only, like a `"use client"` module imported by a client component.
 
 ## Prove it with a test

@@ -619,7 +619,7 @@ function describe(entry: Entry, instance: PrimitiveInstance, parts: Bound[]) {
  * they're made. `registerTools` hands the three to the browser's agent.
  *
  * @example
- * const agent = createAgent({ allow: async (step) => !step.confirm || (await chat.confirm(step.confirm)) || { refusedBy: "person" } })
+ * const agent = createAgent({ allow: (step) => (step.confirm ? chat.confirm(step.confirm) : true) })
  * agent.snapshot() // [{ ref: "c1", component: "select", label: "Region", value: null, actions: ["setValue", "setOpen", ...] }]
  * await agent.act({ steps: [{ ref: "Region", action: "setValue", args: ["Frankfurt"] }, { ref: "Create", action: "press" }] })
  * await agent[call.name](call.input) // a model's tool call
@@ -629,10 +629,8 @@ function createAgent(
   options: {
     /**
      * Whether a step may run, given its component. Return false, or a promise
-     * of false, to refuse it, or say who refused, so the agent hears it:
-     * `{ refusedBy: "person" }` when the person said no, `{ refusedBy: "app" }`
-     * for a rule of the app's. Any other object refuses it too. `signal`
-     * aborts when the step stops waiting, so a confirm the app shows can close.
+     * of false, to refuse it. `signal` aborts when the step stops waiting, so
+     * a confirm the app shows can close.
      */
     allow?: Allow
     /** How long a step waits for `allow` before it fails, in milliseconds. 5 minutes by default. */
@@ -1115,7 +1113,7 @@ function createAgent(
             action: "open",
             args: [item.value],
           }
-          if (await refuser(step)) {
+          if (await refusal(step)) {
             continue
           }
           const open = () => asAgent(() => api.open!(item.value))
@@ -1157,10 +1155,10 @@ function createAgent(
   // `registerTools`' own `allow`, for the calls the browser's agent makes.
   let callerAllow: Allow | undefined
 
-  // Who refused, of `allow` and then `registerTools`' own, or a failed step
-  // when they take longer than `timeout`, since calls run one at a time and a
-  // confirm nobody answers would hold every later one.
-  async function refuser(step: AgentAction) {
+  // Whether the first of `allow` and then `registerTools`' own refused, or a
+  // later one, or a failed step when they take longer than `timeout`, since
+  // calls run one at a time and a confirm nobody answers would hold the rest.
+  async function refusal(step: AgentAction) {
     const checks = [options.allow, callerAllow].filter((check) => !!check)
     if (!checks.length) {
       return undefined
@@ -1172,20 +1170,17 @@ function createAgent(
       (resolve) => (timer = setTimeout(() => resolve("late"), wait))
     )
     const answer = async () => {
-      for (const check of checks) {
-        const refusedBy = refuserOf(
-          await check(step, { signal: controller.signal })
-        )
-        if (refusedBy) {
-          return refusedBy
+      for (const [index, check] of checks.entries()) {
+        if (!(await check(step, { signal: controller.signal }))) {
+          return index ? "later" : "first"
         }
       }
       return undefined
     }
     try {
-      const refusedBy = await Promise.race([answer(), late])
-      if (refusedBy !== "late") {
-        return refusedBy
+      const refused = await Promise.race([answer(), late])
+      if (refused !== "late") {
+        return refused
       }
       controller.abort()
       throw new Error(
@@ -1243,17 +1238,13 @@ function createAgent(
           `Needs a person: "${confirm}". Ask them to ${what} themselves.`
         )
       }
-      const refusedBy = await refuser(step)
-      if (refusedBy) {
-        const target = `${action} on ${entry.ref}`
-        // A plain `false` doesn't say who refused. On a marked step either
-        // could have, so the message names both.
+      const refused = await refusal(step)
+      if (refused) {
+        // The first check answers for the person, so a later one's no is the app's.
         throw new Error(
-          refusedBy === "person"
-            ? `The person said no to ${confirm ? `"${confirm}"` : target}.`
-            : refusedBy === "app" || !confirm
-              ? `The app refused ${target}.`
-              : `The person or the app said no to "${confirm}".`
+          confirm && refused === "first"
+            ? `The person said no to "${confirm}".`
+            : `The app refused ${action} on ${entry.ref}.`
         )
       }
       asked.add(key)
@@ -1886,32 +1877,10 @@ function createAgent(
   return agent
 }
 
-type AllowAnswer = boolean | { refusedBy: "person" | "app" }
-
 type Allow = (
   step: AgentAction,
   context: { signal: AbortSignal }
-) => AllowAnswer | Promise<AllowAnswer>
-
-// An object is truthy, so one that doesn't say who refused would let the step
-// run if it counted as a yes. Every object refuses.
-function refuserOf(answer: unknown) {
-  if (answer === null || typeof answer !== "object") {
-    return answer ? undefined : "unsaid"
-  }
-  const refusedBy = "refusedBy" in answer ? answer.refusedBy : undefined
-  if (refusedBy === "person" || refusedBy === "app") {
-    return refusedBy
-  }
-  if (dev) {
-    warn(
-      '`allow` returned an object without `refusedBy: "person"` or `"app"`, which refuses the step. Return `true` to allow it.',
-      undefined,
-      answer
-    )
-  }
-  return "unsaid"
-}
+) => boolean | Promise<boolean>
 
 // Each agent's `act` with a second `allow` beside its own, for `registerTools`.
 const allowing = new WeakMap<
@@ -1928,11 +1897,12 @@ const allowing = new WeakMap<
  * does nothing where it doesn't. Returns a function that unregisters them.
  *
  * The browser's agent isn't one you wrote, so `allow` is required: it decides
- * each step that agent asks for, after the agent's own `allow`, and answers
- * the same way. Return `true` to let every step run.
+ * each step that agent asks for, after the agent's own `allow`. Return `true`
+ * to let every step run. A step it refuses after the agent's own `allow` let
+ * it through fails with `The app refused …`, even a marked one.
  *
  * @example
- * registerTools(agent, { allow: (step) => step.action !== "press" || confirm(`Press ${step.args[0]}?`) || { refusedBy: "person" } })
+ * registerTools(agent, { allow: (step) => step.action !== "press" || confirm(`Press ${step.args[0]}?`) })
  * @stable
  */
 function registerTools(

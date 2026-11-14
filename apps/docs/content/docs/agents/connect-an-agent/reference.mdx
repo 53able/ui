@@ -19,12 +19,10 @@ const agent = createAgent()
 
 Create it once, in the browser, at startup or later. It finds the components already on the page and registers new ones as they're created; importing the entry alone doesn't start registration. Use the same package as your components so they share one copy of the core.
 
-| Option    | Type                                                                                                                        | What It Does                                                                                                       |
-| --------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `allow`   | `(step: AgentAction, context: { signal: AbortSignal }) => boolean \| { refusedBy: "person" \| "app" }`, or a promise of one | Decides whether a resolved action may run. Returning `false`, or an object that says who refused, refuses it.      |
-| `timeout` | `number`                                                                                                                    | How long a step waits for `allow`, in milliseconds. 5 minutes by default. Then the step fails and `signal` aborts. |
-
-`{ refusedBy: "person" }` and `{ refusedBy: "app" }` refuse the step and say who refused: `The person said no to …` or `The app refused …`. A plain `false` on a step with `confirm` fails with `The person or the app said no to "…"`. Any other object refuses the step.
+| Option    | Type                                                                                   | What It Does                                                                                                       |
+| --------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `allow`   | `(step: AgentAction, context: { signal: AbortSignal }) => boolean \| Promise<boolean>` | Decides whether a resolved action may run. Returning `false` refuses it.                                           |
+| `timeout` | `number`                                                                               | How long a step waits for `allow`, in milliseconds. 5 minutes by default. Then the step fails and `signal` aborts. |
 
 `AgentAction` has `ref`, `component`, optional `label`, `action`, `args`, and `confirm`, the text of a `data-agent-confirm` mark on the target. The arguments may already be resolved, such as an item's label becoming its value. Without `allow`, a step with `confirm` fails with "Needs a person". See [Permissions](./permissions#mark-what-needs-a-person).
 
@@ -198,13 +196,11 @@ Registers the three tools with `document.modelContext.registerTool` when the bro
 import { registerTools } from "@ui-sdk/react/agent"
 
 const unregister = registerTools(agent, {
-  allow: (step) =>
-    step.action !== "press" ||
-    confirm(`Press ${step.args[0]}?`) || { refusedBy: "person" },
+  allow: (step) => step.action !== "press" || confirm(`Press ${step.args[0]}?`),
 })
 ```
 
-`allow` is required. It decides each step the browser's agent asks for, after the bridge's own `allow`, and works the same way: return `false`, or an object that says who refused, to refuse the step, or `true` to let every step run. It returns a cleanup function. In a browser without WebMCP, registration does nothing. See [WebMCP](./webmcp) for registration, cleanup, and tool annotations.
+`allow` is required. It decides each step the browser's agent asks for, after the bridge's own `allow`, and works the same way: return `false` to refuse the step, or `true` to let every step run. A step it refuses after the bridge's `allow` let it through fails with `The app refused …`. Without a bridge `allow`, it answers for the person, and refusing a step with `confirm` fails with `The person said no to "…"`. It returns a cleanup function. In a browser without WebMCP, registration does nothing. See [WebMCP](./webmcp) for registration, cleanup, and tool annotations.
 
 ## Custom Primitives
 

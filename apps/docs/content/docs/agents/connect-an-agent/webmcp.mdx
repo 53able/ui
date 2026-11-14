@@ -16,13 +16,13 @@ import { registerTools } from "@ui-sdk/react/agent"
 import { agent } from "./agent"
 
 const unregister = registerTools(agent, {
-  allow: (step) =>
-    step.action !== "press" ||
-    confirm(`Press ${step.args[0]}?`) || { refusedBy: "person" },
+  allow: (step) => step.action !== "press" || confirm(`Press ${step.args[0]}?`),
 })
 ```
 
-The browser's agent can now read components and call their actions. You didn't write that agent, so `registerTools` asks for an `allow` of its own. It runs for every step the browser's agent asks for, after your bridge's [permissions](./permissions), and works the same way: return `false` to refuse a step, or `{ refusedBy: "person" }` or `{ refusedBy: "app" }` to say who refused. Here it asks you before every press, and tells the agent when you said no. To let every step run, pass `allow: () => true`. Your change callbacks still apply.
+The browser's agent can now read components and call their actions. You didn't write that agent, so `registerTools` asks for an `allow` of its own. It runs for every step the browser's agent asks for, after your bridge's [permissions](./permissions), and works the same way: return `false` to refuse a step. Here it asks you before every press. To let every step run, pass `allow: () => true`. Your change callbacks still apply.
+
+Ask the person in only one of the two `allow` callbacks. When your bridge's `allow` lets a step through and this one refuses it, the step fails with `The app refused press on c1.`, even on a step [marked for a person](./permissions#mark-what-needs-a-person). So when your bridge's `allow` asks the person, pass `allow: () => true` here, or keep this one to your app's rules.
 
 Registration requires a browser that provides `document.modelContext.registerTool`. In a browser without it, `registerTools` does nothing.
 
