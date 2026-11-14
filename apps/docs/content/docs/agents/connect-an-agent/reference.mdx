@@ -133,7 +133,7 @@ Each entry in the result's `steps` names the ref it acted on, so you can see whi
 
 Each change is `{ component, label?, key, value }`. `gone` lists components that left the page, using their refs with labels when available.
 
-A failed step stops the call. Earlier steps stay applied; there is no rollback. A callback can also cancel a change without making the step fail, so `ok: true` doesn't mean every requested value was accepted. Inspect each step's `changes` and the returned `values` to see what took effect.
+A failed step stops the call. A change created and synchronously canceled with `details.cancel()` during the requested action also fails the step. Earlier steps and effects already applied within the failed step stay applied; there is no rollback. See [Permissions](./permissions#cancel-a-value-change) for the cancellation scope. Inspect each step's `changes` and the returned `values` to see what took effect.
 
 `act` and `query` calls on the same bridge are queued in the order they're called.
 

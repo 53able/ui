@@ -6,7 +6,7 @@
 // its elements decide what an agent may do alone (`./marks`).
 import { dev, warn } from "#dev"
 import { isDisabledElement } from "../../foundation/forms/form"
-import { withSource } from "../../foundation/kernel/details"
+import { trackCancellation, withSource } from "../../foundation/kernel/details"
 import { partState } from "../../foundation/kernel/part"
 import type { PrimitiveInstance } from "../../foundation/kernel/primitive-types"
 import { accessibleName } from "../../foundation/text/accessible-name"
@@ -1511,8 +1511,9 @@ function createAgent(
     const failure = (error: unknown) =>
       secret ? "[redacted]" : messageOf(error)
     let result: unknown
+    let canceled = false
     try {
-      result = asAgent(run)
+      ;({ result, canceled } = trackCancellation(() => asAgent(run)))
     } catch (error) {
       if (!secret) {
         throw error
@@ -1550,6 +1551,9 @@ function createAgent(
           `${action} on ${entry.label ?? entry.component} (${entry.ref}) failed: ${failure(failed.error)}`
         )
       }
+      if (canceled) {
+        throw new Error(failure(`The app refused ${action} on ${entry.ref}.`))
+      }
       if (settled.pending) {
         return { ref: entry.ref, result: `${action} is still running.` }
       }
@@ -1575,6 +1579,9 @@ function createAgent(
       throw new Error(
         `${pressed}, and its action failed: ${failure(settled.error)}`
       )
+    }
+    if (canceled) {
+      throw new Error(failure(`The app refused ${action} on ${entry.ref}.`))
     }
     if (settled.pending) {
       return {

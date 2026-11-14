@@ -25,6 +25,7 @@ export {
   type DismissReason,
   isDismissal,
   resolveSource,
+  trackCancellation,
   withSource,
 } from "./details"
 export { settleDraft } from "./draft"

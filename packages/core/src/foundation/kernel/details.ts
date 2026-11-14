@@ -281,6 +281,7 @@ const programmaticReasons: ReadonlySet<string> = new Set<ChangeReason>([
 // The source of the change being dispatched, for changes it causes in turn,
 // like a submenu closing because its parent did.
 let cause: ChangeSource | undefined
+let onCancel: (() => void) | undefined
 
 /**
  * How a change came about, from its reason, the source of its event if it
@@ -328,6 +329,25 @@ function withSource<T>(source: ChangeSource | undefined, run: () => T) {
   }
 }
 
+function trackCancellation<T>(run: () => T) {
+  const outer = onCancel
+  let active = true
+  let canceled = false
+  onCancel = () => {
+    if (active) {
+      canceled = true
+      outer?.()
+    }
+  }
+  try {
+    const result = run()
+    return { result, canceled }
+  } finally {
+    active = false
+    onCancel = outer
+  }
+}
+
 /**
  * The details a callback receives: the `reason`, the `event` and anything
  * else `given`, like which item changed, with how the user caused it. A
@@ -351,12 +371,14 @@ function createDetails<
   if (!cancelable) {
     return { ...given, source } as unknown as Details
   }
+  const notifyCanceled = onCancel
   let canceled = false
   return {
     ...given,
     source,
     cancel: () => {
       canceled = true
+      notifyCanceled?.()
     },
     get canceled() {
       return canceled
@@ -377,5 +399,6 @@ export {
   isDismissal,
   type ReasonVocabulary,
   resolveSource,
+  trackCancellation,
   withSource,
 }
