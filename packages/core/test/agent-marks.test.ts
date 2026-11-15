@@ -187,6 +187,90 @@ describe("data-agent-confirm", () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
+  test.each([
+    {
+      when: "the bridge's allow said yes and registerTools' refused",
+      own: true,
+      caller: false,
+      marked: true,
+      asked: ["own", "caller"],
+      message: /^The app refused press on c\d+\.$/,
+    },
+    {
+      when: "the bridge's allow refused",
+      own: false,
+      caller: true,
+      marked: true,
+      asked: ["own"],
+      message: /^The person said no to "Charges \$20"\.$/,
+    },
+    {
+      when: "registerTools' allow is the only one and refused",
+      own: undefined,
+      caller: false,
+      marked: true,
+      asked: ["caller"],
+      message: /^The person said no to "Charges \$20"\.$/,
+    },
+    {
+      when: "registerTools' allow refused a step without a mark",
+      own: true,
+      caller: false,
+      marked: false,
+      asked: ["own", "caller"],
+      message: /^The app refused press on c\d+\.$/,
+    },
+    {
+      when: "both said yes",
+      own: true,
+      caller: true,
+      marked: true,
+      asked: ["own", "caller"],
+      message: undefined,
+    },
+  ])(
+    "through WebMCP, a refusal says who refused: $when",
+    async ({ own, caller, marked, asked, message }) => {
+      const tools = new Map<
+        string,
+        {
+          execute: (
+            input: object
+          ) => Promise<{ ok: boolean; error?: { message: string } }>
+        }
+      >()
+      Object.assign(document, {
+        modelContext: {
+          registerTool: async (tool: { name: string }) =>
+            void tools.set(tool.name, tool as never),
+        },
+      })
+      const calls: string[] = []
+      const agent = createAgent(
+        own === undefined ? {} : { allow: () => (calls.push("own"), own) }
+      )
+      cleanups.push(
+        registerTools(agent, {
+          allow: async () => (calls.push("caller"), caller),
+        }),
+        () => Reflect.deleteProperty(document, "modelContext")
+      )
+      const { el, onClick } = mountButton("Buy credits")
+      if (marked) {
+        el.setAttribute("data-agent-confirm", "Charges $20")
+      }
+      const outcome = await tools
+        .get("act")!
+        .execute({ steps: [{ ref: "Buy credits", action: "press" }] })
+      expect(outcome.ok).toBe(!message)
+      expect(outcome.error?.message).toEqual(
+        message ? expect.stringMatching(message) : undefined
+      )
+      expect(calls).toEqual(asked)
+      expect(onClick).toHaveBeenCalledTimes(message ? 0 : 1)
+    }
+  )
+
   test("a step nobody answers fails after the timeout, aborts allow's signal and frees the next call", async () => {
     let signal: AbortSignal | undefined
     const agent = createAgent({

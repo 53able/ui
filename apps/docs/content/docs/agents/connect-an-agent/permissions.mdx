@@ -76,7 +76,7 @@ const agent = createAgent({
 })
 ```
 
-If the person says no, the step fails with `The person said no to "…"`.
+If the person says no, the step fails with `The person said no to "…"`. If they say yes and the `allow` of [`registerTools`](./webmcp#register-the-tools) then refuses the step, it fails with `The app refused press on c1.`
 
 The mark covers its element and everything inside it, for any action. Put it on a form or section to cover every control in it, or on a dialog's content to cover the buttons inside, wherever the dialog renders.
 

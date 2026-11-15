@@ -1954,6 +1954,33 @@ describe("agent act", () => {
     ])
   })
 
+  test("a closed section stays shut when allow refuses to open it", async () => {
+    const agent = createAgent({ allow: (step) => step.action !== "open" })
+    const onValueChange = vi.fn()
+    const instance = accordion({ id: "channels", onValueChange })
+    for (const [value, text] of [
+      ["slack", "Slack"],
+      ["email", "Email"],
+    ]) {
+      const item = document.createElement("div")
+      const trigger = document.createElement("button")
+      trigger.textContent = text
+      item.append(trigger)
+      document.body.append(item)
+      cleanups.push(
+        bind(instance.part("item", { value }), item),
+        bind(instance.part("trigger", { value }), trigger)
+      )
+    }
+    cleanups.push(() => instance.destroy())
+    const outcome = await agent.act({
+      steps: [{ ref: "Deploy failures", action: "setChecked", args: [true] }],
+    })
+    expect(outcome.ok).toBe(false)
+    expect(onValueChange).not.toHaveBeenCalled()
+    expect(instance.get().value).toEqual([])
+  })
+
   test("a slider given text takes the number in it", async () => {
     const agent = createAgent()
     const instance = slider({

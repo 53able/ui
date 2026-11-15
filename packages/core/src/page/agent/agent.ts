@@ -1113,7 +1113,7 @@ function createAgent(
             action: "open",
             args: [item.value],
           }
-          if (!(await allowed(step))) {
+          if (await refusal(step)) {
             continue
           }
           const open = () => asAgent(() => api.open!(item.value))
@@ -1155,13 +1155,13 @@ function createAgent(
   // `registerTools`' own `allow`, for the calls the browser's agent makes.
   let callerAllow: Allow | undefined
 
-  // The answer of `allow` and then `registerTools`' own, or a failed step when
-  // they take longer than `timeout`, since calls run one at a time and a
-  // confirm nobody answers would hold every later one.
-  async function allowed(step: AgentAction) {
+  // Whether the first of `allow` and then `registerTools`' own refused, or a
+  // later one, or a failed step when they take longer than `timeout`, since
+  // calls run one at a time and a confirm nobody answers would hold the rest.
+  async function refusal(step: AgentAction) {
     const checks = [options.allow, callerAllow].filter((check) => !!check)
     if (!checks.length) {
-      return true
+      return undefined
     }
     const controller = new AbortController()
     const wait = options.timeout ?? 300_000
@@ -1170,17 +1170,17 @@ function createAgent(
       (resolve) => (timer = setTimeout(() => resolve("late"), wait))
     )
     const answer = async () => {
-      for (const check of checks) {
+      for (const [index, check] of checks.entries()) {
         if (!(await check(step, { signal: controller.signal }))) {
-          return false
+          return index ? "later" : "first"
         }
       }
-      return true
+      return undefined
     }
     try {
-      const ok = await Promise.race([answer(), late])
-      if (ok !== "late") {
-        return ok
+      const refused = await Promise.race([answer(), late])
+      if (refused !== "late") {
+        return refused
       }
       controller.abort()
       throw new Error(
@@ -1238,9 +1238,11 @@ function createAgent(
           `Needs a person: "${confirm}". Ask them to ${what} themselves.`
         )
       }
-      if (!(await allowed(step))) {
+      const refused = await refusal(step)
+      if (refused) {
+        // The first check answers for the person, so a later one's no is the app's.
         throw new Error(
-          confirm
+          confirm && refused === "first"
             ? `The person said no to "${confirm}".`
             : `The app refused ${action} on ${entry.ref}.`
         )
@@ -1896,7 +1898,8 @@ const allowing = new WeakMap<
  *
  * The browser's agent isn't one you wrote, so `allow` is required: it decides
  * each step that agent asks for, after the agent's own `allow`. Return `true`
- * to let every step run.
+ * to let every step run. A step it refuses after the agent's own `allow` let
+ * it through fails with `The app refused …`, even a marked one.
  *
  * @example
  * registerTools(agent, { allow: (step) => step.action !== "press" || confirm(`Press ${step.args[0]}?`) })
